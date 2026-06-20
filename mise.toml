@@ -1,0 +1,6 @@
+[tools]
+python = "3.11"
+
+[env]
+# Auto-create and activate a project-local virtualenv at ./.venv
+_.python.venv = { path = ".venv", create = true }

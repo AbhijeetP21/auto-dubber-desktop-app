@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Virtual env (managed locally by mise)
+.venv/
+
+# PyInstaller build output
+build/
+dist/
+
+# Claude
+.claude/
+CLAUDE.md
+
+# Local test media (generated, not source)
+test_assets/
+
+# OS junk
+.DS_Store
+Thumbs.db
