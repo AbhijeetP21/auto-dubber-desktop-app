@@ -1,0 +1,110 @@
+name: Build Releases
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v1.0.0)'
+        required: false
+        default: 'dev'
+
+jobs:
+  build-macos:
+    runs-on: macos-14        # Apple Silicon runner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Generate icons
+        run: python assets/generate_icons.py
+
+      - name: Build .app
+        run: pyinstaller build_mac.spec --clean --noconfirm
+
+      - name: Create DMG
+        run: |
+          create-dmg \
+            --volname "AutoDubber" \
+            --window-size 600 400 \
+            --icon-size 128 \
+            --icon "AutoDubber.app" 150 200 \
+            --app-drop-link 450 200 \
+            "dist/AutoDubber-mac.dmg" \
+            "dist/AutoDubber.app"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoDubber-mac
+          path: dist/AutoDubber-mac.dmg
+          retention-days: 30
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Generate icons
+        run: python assets/generate_icons.py
+
+      - name: Build .exe
+        run: pyinstaller build_windows.spec --clean --noconfirm
+
+      - name: Zip output
+        run: Compress-Archive -Path dist/AutoDubber -DestinationPath dist/AutoDubber-windows.zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoDubber-windows
+          path: dist/AutoDubber-windows.zip
+          retention-days: 30
+
+  release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            AutoDubber-mac/AutoDubber-mac.dmg
+            AutoDubber-windows/AutoDubber-windows.zip
+          generate_release_notes: true

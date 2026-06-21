@@ -99,6 +99,25 @@ run, keeping the installer small.
 
 ---
 
+## Releasing
+
+CI ([.github/workflows/build.yml](.github/workflows/build.yml)) builds both
+platforms and publishes a GitHub Release automatically when you push a version
+tag:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This runs the macOS and Windows builds in parallel and attaches
+`AutoDubber-mac.dmg` and `AutoDubber-windows.zip` to the release. You can also
+trigger a build without releasing via the **Actions ▸ Build Releases ▸ Run
+workflow** button (uses `workflow_dispatch`; artifacts are uploaded but no
+release is created).
+
+---
+
 ## Playing the output in VLC
 
 - **Audio track:** `Audio ▸ Audio Track` → choose *Original Audio* or *English Dub*
