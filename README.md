@@ -6,14 +6,14 @@ track plus styled English subtitles, and writes a multi-track `.mkv` you can
 play in VLC. In the player you can switch between the original and dubbed audio
 and toggle subtitles on or off.
 
-> **Status:** CLI pipeline, desktop UI, and PyInstaller packaging are built. CI
-> release automation (GitHub Actions) is the remaining piece.
+It runs as a desktop app or from the command line, bundles its own FFmpeg, and
+produces cross-platform builds (Windows + macOS) via GitHub Actions.
 
 ---
 
-## Phase 1 — CLI pipeline
+## How it works
 
-The pipeline runs entirely from `src/cli_test.py`, no UI required:
+The core pipeline also runs standalone from `src/cli_test.py`, no UI required:
 
 ```
 extract audio → transcribe + translate (Whisper) → write ASS subtitles
@@ -130,9 +130,8 @@ The file opens with the original audio and subtitles off by default.
 ## Settings
 
 Settings persist to JSON (`%APPDATA%/AutoDubber/settings.json` on Windows,
-`~/Library/Application Support/AutoDubber/settings.json` on macOS). Phase 1 reads
-the Whisper model, subtitle font/size, max stretch ratio, and TTS voices; the
-rest is wired up by the UI in later phases.
+`~/Library/Application Support/AutoDubber/settings.json` on macOS) and are
+editable in the in-app **⚙ Settings** dialog.
 
 | Setting | Default | Notes |
 |---|---|---|

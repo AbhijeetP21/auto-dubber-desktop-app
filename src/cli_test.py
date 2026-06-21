@@ -1,4 +1,4 @@
-"""Phase 1 CLI acceptance test: run the full pipeline on one video, no UI.
+"""CLI test harness: run the full pipeline on one video, no UI.
 
 Usage:
     python cli_test.py path/to/video.mp4 [--lang ja] [--tts kokoro|openai]
@@ -49,7 +49,7 @@ def _progress(stage: str, progress: float, message: str) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Auto-Dubber Phase 1 CLI test")
+    parser = argparse.ArgumentParser(description="Auto-Dubber CLI test")
     parser.add_argument("video", type=Path, help="input video file")
     parser.add_argument("--lang", default=None, help="source language ISO 639-1 hint (e.g. ja)")
     parser.add_argument("--tts", default="kokoro", choices=["kokoro", "openai"])

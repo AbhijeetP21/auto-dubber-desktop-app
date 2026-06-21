@@ -1,8 +1,8 @@
 """Main application window: drop zone, queue, settings, and bottom controls.
 
-Phase 2 builds the full UI shell. The actual background processing (threading,
-progress wiring, model download banner) is added in Phase 3 — ``_start_queue``
-is the seam where that hooks in.
+Wires the widgets together and drives background processing: ``_start_queue``
+hands jobs to the threaded :class:`ProcessingQueue`, whose callbacks are
+marshaled back onto the UI thread.
 """
 from __future__ import annotations
 

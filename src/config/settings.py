@@ -1,8 +1,8 @@
 """Application settings: dataclass + JSON persistence.
 
-Phase 1 only consumes a handful of these fields (Whisper model, subtitle font,
-stretch ratio, TTS voices), but the full schema is defined here so later phases
-can wire the UI to the same object without churn.
+The pipeline consumes a handful of these fields (Whisper model, subtitle font,
+stretch ratio, TTS voices); the full schema is defined here so the UI and
+pipeline share a single settings object.
 """
 from __future__ import annotations
 
