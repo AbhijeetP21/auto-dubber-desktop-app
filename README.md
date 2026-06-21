@@ -6,8 +6,8 @@ track plus styled English subtitles, and writes a multi-track `.mkv` you can
 play in VLC. In the player you can switch between the original and dubbed audio
 and toggle subtitles on or off.
 
-> **Status:** Phase 1 (core CLI pipeline) is built and is the current focus. The
-> CustomTkinter UI (Phases 2–3) and packaging/CI (Phases 4–5) are not built yet.
+> **Status:** CLI pipeline, desktop UI, and PyInstaller packaging are built. CI
+> release automation (GitHub Actions) is the remaining piece.
 
 ---
 
@@ -62,6 +62,40 @@ On first run the chosen TTS downloads its model files:
 ### Supported formats
 
 Input: `.mp4`, `.mkv`, `.mov`, `.avi` — Output: `.mkv`
+
+### Run the desktop app
+
+```bash
+.venv/Scripts/python src/main.py    # Windows
+.venv/bin/python   src/main.py      # macOS/Linux
+```
+
+Drag videos onto the drop zone (or click to browse), pick a source-language hint
+if you like, choose a TTS provider in Settings, then **Start Queue**. Each file
+shows live progress and, when done, a clickable link that reveals the output.
+
+---
+
+## Building desktop installers
+
+Bundled with [PyInstaller](https://pyinstaller.org/) (6.x). FFmpeg and the UI
+themes are packaged inside the app; users don't need Python or FFmpeg installed.
+
+```bash
+# Windows  → dist/AutoDubber/AutoDubber.exe
+build_windows.bat
+
+# macOS    → dist/AutoDubber.dmg   (must be run on macOS)
+bash build_mac.sh
+```
+
+The icon is generated from `assets/icon.png` into `.ico`/`.icns` by
+`assets/generate_icons.py` (the build scripts run it automatically). Whisper and
+Kokoro models are **not** bundled — they download to the user's cache on first
+run, keeping the installer small.
+
+> macOS builds can only be produced on macOS (or the GitHub Actions
+> `macos-14` runner); the Windows build is produced on Windows.
 
 ---
 

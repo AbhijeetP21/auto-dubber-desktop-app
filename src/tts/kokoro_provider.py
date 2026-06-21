@@ -102,9 +102,11 @@ class KokoroProvider(TTSProvider):
         return "Kokoro (Local — Free)"
 
     def is_available(self) -> tuple[bool, str]:
-        try:
-            import kokoro_onnx  # noqa: F401
-        except ImportError:
+        # find_spec checks the package is importable without actually importing
+        # the heavy kokoro_onnx → phonemizer chain (keeps startup fast).
+        import importlib.util
+
+        if importlib.util.find_spec("kokoro_onnx") is None:
             return (False, "kokoro-onnx package not installed")
         if not model_files_present():
             return (False, "Model not downloaded yet")

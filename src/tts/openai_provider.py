@@ -54,9 +54,9 @@ class OpenAIProvider(TTSProvider):
         return "OpenAI TTS (API — Better Quality)"
 
     def is_available(self) -> tuple[bool, str]:
-        try:
-            import openai  # noqa: F401
-        except ImportError:
+        import importlib.util
+
+        if importlib.util.find_spec("openai") is None:
             return (False, "openai package not installed")
         if not self._api_key:
             return (False, "No OpenAI API key set in settings")
