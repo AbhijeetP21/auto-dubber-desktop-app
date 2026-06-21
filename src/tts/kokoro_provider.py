@@ -27,35 +27,58 @@ _VOICES_PATH = _CACHE_DIR / "voices-v1.0.bin"
 _SAMPLE_RATE = 24000
 
 
-def _download(url: str, dest: Path, progress_callback: Callable[[float], None] | None = None) -> None:
-    """Download ``url`` to ``dest`` atomically, reporting fractional progress."""
+class DownloadCancelled(Exception):
+    """Raised when a model download is cancelled mid-flight."""
+
+
+def _download(
+    url: str,
+    dest: Path,
+    progress_callback: Callable[[float], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+) -> None:
+    """Download ``url`` to ``dest`` atomically, reporting fractional progress.
+
+    If ``should_cancel`` returns True mid-download, the partial file is removed
+    and :class:`DownloadCancelled` is raised.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
-    with urllib.request.urlopen(url) as resp:  # noqa: S310 (trusted GitHub release URL)
-        total = int(resp.headers.get("Content-Length", 0))
-        read = 0
-        with open(tmp, "wb") as f:
-            while True:
-                chunk = resp.read(1 << 20)
-                if not chunk:
-                    break
-                f.write(chunk)
-                read += len(chunk)
-                if progress_callback is not None and total:
-                    progress_callback(read / total)
-    tmp.replace(dest)
+    try:
+        with urllib.request.urlopen(url) as resp:  # noqa: S310 (trusted GitHub release URL)
+            total = int(resp.headers.get("Content-Length", 0))
+            read = 0
+            with open(tmp, "wb") as f:
+                while True:
+                    if should_cancel is not None and should_cancel():
+                        raise DownloadCancelled()
+                    chunk = resp.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    read += len(chunk)
+                    if progress_callback is not None and total:
+                        progress_callback(read / total)
+        tmp.replace(dest)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
-def ensure_model_files(progress_callback: Callable[[str, float], None] | None = None) -> None:
+def ensure_model_files(
+    progress_callback: Callable[[str, float], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+) -> None:
     """Download Kokoro model files if not already cached.
 
     ``progress_callback(filename, fraction)`` is invoked during downloads.
+    Raises :class:`DownloadCancelled` if ``should_cancel`` signals a stop.
     """
     for url, dest in ((_MODEL_URL, _MODEL_PATH), (_VOICES_URL, _VOICES_PATH)):
         if dest.exists():
             continue
         cb = (lambda frac, name=dest.name: progress_callback(name, frac)) if progress_callback else None
-        _download(url, dest, cb)
+        _download(url, dest, cb, should_cancel)
 
 
 def model_files_present() -> bool:

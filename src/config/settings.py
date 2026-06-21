@@ -12,6 +12,9 @@ import sys
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
+# Video containers the app accepts as input (app-wide constant).
+SUPPORTED_VIDEO_EXTENSIONS: tuple[str, ...] = (".mp4", ".mkv", ".mov", ".avi")
+
 
 @dataclass
 class AppSettings:

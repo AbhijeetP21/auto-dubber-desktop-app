@@ -21,10 +21,10 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-from config.settings import load_settings  # noqa: E402
+from config.settings import SUPPORTED_VIDEO_EXTENSIONS, load_settings  # noqa: E402
 from pipeline.processor import ProcessingJob, process_video  # noqa: E402
 
-SUPPORTED_EXTS = {".mp4", ".mkv", ".mov", ".avi"}
+SUPPORTED_EXTS = SUPPORTED_VIDEO_EXTENSIONS
 
 
 def _build_tts(provider_id: str, settings):
