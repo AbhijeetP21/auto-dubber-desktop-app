@@ -7,6 +7,8 @@ call.
 """
 from __future__ import annotations
 
+import socket
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Callable
@@ -14,6 +16,12 @@ from typing import Callable
 import soundfile as sf
 
 from .base import TTSProvider
+
+# Network robustness: a stalled connection must error out (and be retried/
+# resumed) rather than hang forever — the original bug was an untimed urlopen
+# that blocked indefinitely after a dropped connection (e.g. laptop sleep).
+_TIMEOUT_SECONDS = 30
+_MAX_ATTEMPTS = 4
 
 # Official model-file release assets for kokoro-onnx v1.0.
 _MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"
@@ -37,32 +45,70 @@ def _download(
     progress_callback: Callable[[float], None] | None = None,
     should_cancel: Callable[[], bool] | None = None,
 ) -> None:
-    """Download ``url`` to ``dest`` atomically, reporting fractional progress.
+    """Download ``url`` to ``dest`` robustly.
 
-    If ``should_cancel`` returns True mid-download, the partial file is removed
-    and :class:`DownloadCancelled` is raised.
+    - Uses a socket timeout so a stalled connection raises instead of hanging.
+    - Resumes from a partial ``.part`` file via an HTTP Range request, retrying
+      transient network errors up to ``_MAX_ATTEMPTS`` times.
+    - Reports fractional progress via ``progress_callback``.
+    - Raises :class:`DownloadCancelled` (and discards the partial) if
+      ``should_cancel`` signals a stop; raises ``RuntimeError`` if all attempts
+      fail (the partial is kept so a later run can resume).
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
-    try:
-        with urllib.request.urlopen(url) as resp:  # noqa: S310 (trusted GitHub release URL)
-            total = int(resp.headers.get("Content-Length", 0))
-            read = 0
-            with open(tmp, "wb") as f:
-                while True:
-                    if should_cancel is not None and should_cancel():
-                        raise DownloadCancelled()
-                    chunk = resp.read(1 << 20)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    read += len(chunk)
-                    if progress_callback is not None and total:
-                        progress_callback(read / total)
-        tmp.replace(dest)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise
+    last_error: Exception | None = None
+
+    for _attempt in range(_MAX_ATTEMPTS):
+        if should_cancel is not None and should_cancel():
+            tmp.unlink(missing_ok=True)
+            raise DownloadCancelled()
+
+        resume_from = tmp.stat().st_size if tmp.exists() else 0
+        req = urllib.request.Request(url)
+        if resume_from:
+            req.add_header("Range", f"bytes={resume_from}-")
+
+        try:
+            with urllib.request.urlopen(req, timeout=_TIMEOUT_SECONDS) as resp:  # noqa: S310 (trusted GitHub release URL)
+                length = int(resp.headers.get("Content-Length", 0))
+                if getattr(resp, "status", 200) == 206:
+                    total = resume_from + length            # partial content
+                    mode = "ab"
+                else:
+                    total, resume_from, mode = length, 0, "wb"  # server sent full file
+
+                read = resume_from
+                with open(tmp, mode) as f:
+                    while True:
+                        if should_cancel is not None and should_cancel():
+                            tmp.unlink(missing_ok=True)
+                            raise DownloadCancelled()
+                        chunk = resp.read(1 << 20)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        read += len(chunk)
+                        if progress_callback is not None and total:
+                            progress_callback(min(read / total, 1.0))
+
+            # Stream ended; verify completeness before committing.
+            if total and tmp.stat().st_size < total:
+                last_error = IOError(
+                    f"incomplete download ({tmp.stat().st_size}/{total} bytes)"
+                )
+                continue  # resume on next attempt
+            tmp.replace(dest)
+            return
+        except DownloadCancelled:
+            raise
+        except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError, OSError) as exc:
+            last_error = exc  # keep .part for resume, then retry
+            continue
+
+    raise RuntimeError(
+        f"Download failed after {_MAX_ATTEMPTS} attempts: {last_error}"
+    )
 
 
 def ensure_model_files(

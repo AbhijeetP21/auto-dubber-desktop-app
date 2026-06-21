@@ -19,10 +19,11 @@ def _selftest() -> int:
     import tempfile
     from pathlib import Path as _Path
 
-    from tts.kokoro_provider import KokoroProvider
+    from tts.kokoro_provider import KokoroProvider, model_files_present
     from utils.ffmpeg_utils import get_ffmpeg_path
 
     print(f"ffmpeg: {get_ffmpeg_path()}")
+    print(f"models cached: {model_files_present()}")
     provider = KokoroProvider()
     ready, reason = provider.is_available()
     print(f"kokoro available: {ready} {reason}")

@@ -160,8 +160,20 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
     def _maybe_start_model_download(self) -> None:
         if self.settings.tts_provider != "kokoro" or model_files_present():
             return
+        self._start_model_download()
+
+    def _start_model_download(self) -> None:
+        """(Re)start the Kokoro download and show the banner in its active state."""
+        if self._download_in_progress():
+            return
         self._download_cancel.clear()
-        self._banner_cancel.configure(state="normal", text="Cancel")
+        self._banner_label.configure(
+            text="Downloading Kokoro TTS model (first run)…",
+            text_color=styles.TEXT_PRIMARY,
+        )
+        self._banner_cancel.configure(
+            state="normal", text="Cancel", command=self._cancel_model_download
+        )
         self._banner_bar.set(0.0)
         self._banner.grid()
         self._download_thread = threading.Thread(target=self._download_worker, daemon=True)
@@ -200,10 +212,16 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self._refresh_tts_indicator()
 
     def _on_download_failed(self, message: str) -> None:
-        self._banner.grid_remove()
-        self._kokoro_unavailable_this_session = True
-        self._flash_message(f"Model download failed: {message[:60]}")
-        self._refresh_tts_indicator()
+        # Keep the banner up with the error and offer a Retry (the partial
+        # download resumes), rather than silently giving up.
+        self._banner_label.configure(
+            text=f"Download failed: {message[:80]}", text_color=styles.ERROR
+        )
+        self._banner_bar.set(0.0)
+        self._banner_cancel.configure(
+            state="normal", text="Retry", command=self._start_model_download
+        )
+        self._flash_message("Model download failed — Retry, or switch to OpenAI in Settings")
 
     def _download_in_progress(self) -> bool:
         return self._download_thread is not None and self._download_thread.is_alive()
@@ -328,6 +346,11 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             return
         if self.settings.tts_provider == "kokoro" and self._kokoro_unavailable_this_session:
             self._flash_message("Kokoro disabled this session — enable OpenAI in Settings")
+            return
+        if self.settings.tts_provider == "kokoro" and not model_files_present():
+            # Don't start a job that would stall on a mid-run model download.
+            self._start_model_download()
+            self._flash_message("Downloading Kokoro model first — start the queue again when ready")
             return
 
         out_dir = (
