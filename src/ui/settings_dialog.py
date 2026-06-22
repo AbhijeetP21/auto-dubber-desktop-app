@@ -165,8 +165,8 @@ class SettingsDialog(ctk.CTkToplevel):
         self._size_slider = ctk.CTkSlider(
             size_row,
             from_=12,
-            to=28,
-            number_of_steps=16,
+            to=48,
+            number_of_steps=36,
             variable=self._size_value,
             command=self._on_size_change,
             progress_color=styles.ACCENT,

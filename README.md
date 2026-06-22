@@ -120,10 +120,11 @@ release is created).
 
 ## Playing the output in VLC
 
-- **Audio track:** `Audio ▸ Audio Track` → choose *Original Audio* or *English Dub*
-- **Subtitles:** `Subtitle ▸ Sub Track` → choose *English Subtitles*
+- **Audio track:** `Audio ▸ Audio Track` → choose *English Dub* or *Original Audio*
+- **Subtitles:** `Subtitle ▸ Sub Track` → choose *English Subtitles* or *Disable*
 
-The file opens with the original audio and subtitles off by default.
+The file opens with the **English dub** and **subtitles on** by default; switch to
+the original audio or turn subtitles off from the same menus.
 
 ---
 
@@ -140,5 +141,5 @@ editable in the in-app **⚙ Settings** dialog.
 | `kokoro_voice` | `af_heart` | warm, natural English voice |
 | `openai_voice` | `nova` | used with `tts-1-hd` |
 | `subtitle_font` | `Arial` | `Arial`, `Georgia`, or `Verdana` |
-| `subtitle_font_size` | `18` | 12–28 |
+| `subtitle_font_size` | `32` | 12–48 |
 | `max_stretch_ratio` | `1.35` | max dub speed-up before truncation |

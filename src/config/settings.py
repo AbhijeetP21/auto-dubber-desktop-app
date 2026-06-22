@@ -25,7 +25,7 @@ class AppSettings:
     whisper_model: str = "large-v3"
     output_directory: str = ""              # empty = same as input
     subtitle_font: str = "Arial"
-    subtitle_font_size: int = 18
+    subtitle_font_size: int = 32
     max_stretch_ratio: float = 1.35
     open_output_on_complete: bool = False
 

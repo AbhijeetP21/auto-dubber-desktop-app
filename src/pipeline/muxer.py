@@ -19,9 +19,9 @@ def mux_output(
 
     Track layout:
       - video: copied (no re-encode)
-      - audio 0: original, copied, marked default
-      - audio 1: English dub, AAC 192k, not default
-      - subtitle 0: English ASS, off by default
+      - audio 0: original, copied, not default
+      - audio 1: English dub, AAC 192k, marked default (plays first)
+      - subtitle 0: English ASS, marked default (shown by default)
 
     Raises ``ValueError`` if the source has no audio, ``RuntimeError`` on FFmpeg
     failure (with captured stderr).
@@ -57,9 +57,9 @@ def mux_output(
         "-metadata:s:a:1", "language=eng",
         "-metadata:s:s:0", "title=English Subtitles",
         "-metadata:s:s:0", "language=eng",
-        "-disposition:a:0", "default",
-        "-disposition:a:1", "0",
-        "-disposition:s:0", "0",
+        "-disposition:a:0", "0",
+        "-disposition:a:1", "default",
+        "-disposition:s:0", "default",
         "-y", str(output_path),
     ]
 
