@@ -66,6 +66,12 @@ def transcribe(
         str(audio_path),
         task="translate",
         language=language_hint,
+        # Anti-repetition: Whisper can loop on the same translated sentence,
+        # especially over music/silence. These three options together are the
+        # standard mitigation:
+        vad_filter=True,                   # skip non-speech that triggers hallucinated loops
+        condition_on_previous_text=False,  # don't let a repeat feed itself and perpetuate
+        no_repeat_ngram_size=3,            # hard-block repeating 3-grams during decoding
     )
 
     detected_name = iso639_1_to_name(info.language)
@@ -79,7 +85,11 @@ def transcribe(
     total_duration = float(getattr(info, "duration", 0.0)) or 0.0
     for seg in segments_iter:
         cleaned = _clean_text(seg.text)
-        if cleaned is not None:
+        # Safety net: drop a segment that exactly repeats the previous kept line
+        # (a residual Whisper loop), so it can't flood the dub and subtitles.
+        if cleaned is not None and not (
+            result.segments and result.segments[-1].text.lower() == cleaned.lower()
+        ):
             result.segments.append(Segment(start=seg.start, end=seg.end, text=cleaned))
         if progress_callback is not None and total_duration > 0:
             progress_callback(min(seg.end / total_duration, 1.0))
