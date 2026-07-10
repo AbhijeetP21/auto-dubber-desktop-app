@@ -14,7 +14,7 @@ from pathlib import Path
 
 from pydub import AudioSegment
 
-from utils.ffmpeg_utils import get_ffmpeg_path
+from utils.ffmpeg_utils import SUBPROCESS_FLAGS, get_ffmpeg_path
 
 from .transcriber import Segment
 
@@ -46,6 +46,7 @@ def _speedup_ffmpeg(audio: AudioSegment, ratio: float, ffmpeg_path: str) -> Audi
             [ffmpeg_path, "-i", inp_path, "-filter:a", atempo_filter, "-y", out_path],
             check=True,
             capture_output=True,
+            creationflags=SUBPROCESS_FLAGS,
         )
         result = AudioSegment.from_wav(out_path)
     finally:
@@ -77,7 +78,9 @@ def _fit_segment(
         # short fade so the cut isn't jarring.
         fitted = _speedup_ffmpeg(tts_audio, max_stretch_ratio, ffmpeg_path)
         if len(fitted) > window_ms:
-            fitted = fitted[:window_ms].fade_out(_FADE_OUT_MS)
+            # Fade can't exceed the clip length (windows shorter than the
+            # fade would otherwise fail or go fully silent).
+            fitted = fitted[:window_ms].fade_out(min(_FADE_OUT_MS, window_ms))
 
     # Normalize to exact window length (atempo output can be off by a few ms).
     if len(fitted) > window_ms:

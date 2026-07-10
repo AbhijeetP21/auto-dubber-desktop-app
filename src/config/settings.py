@@ -57,7 +57,19 @@ def load_settings() -> AppSettings:
         return AppSettings()
     known = {f.name for f in fields(AppSettings)}
     filtered = {k: v for k, v in raw.items() if k in known}
-    return AppSettings(**filtered)
+    settings = AppSettings(**filtered)
+    # A hand-edited file can hold anything; bad numerics would crash the
+    # settings dialog (IntVar) or feed nonsense into the pipeline.
+    defaults = AppSettings()
+    try:
+        settings.subtitle_font_size = max(12, min(48, int(settings.subtitle_font_size)))
+    except (TypeError, ValueError):
+        settings.subtitle_font_size = defaults.subtitle_font_size
+    try:
+        settings.max_stretch_ratio = float(settings.max_stretch_ratio)
+    except (TypeError, ValueError):
+        settings.max_stretch_ratio = defaults.max_stretch_ratio
+    return settings
 
 
 def save_settings(settings: AppSettings) -> None:

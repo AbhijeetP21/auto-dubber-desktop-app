@@ -30,25 +30,16 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Install create-dmg
-        run: brew install create-dmg
-
       - name: Generate icons
         run: python assets/generate_icons.py
 
       - name: Build .app
         run: pyinstaller build_mac.spec --clean --noconfirm
 
+      # hdiutil works headless; create-dmg drives Finder via AppleScript and
+      # fails on GUI-less runners. Matches build_mac.sh.
       - name: Create DMG
-        run: |
-          create-dmg \
-            --volname "AutoDubber" \
-            --window-size 600 400 \
-            --icon-size 128 \
-            --icon "AutoDubber.app" 150 200 \
-            --app-drop-link 450 200 \
-            "dist/AutoDubber-mac.dmg" \
-            "dist/AutoDubber.app"
+        run: hdiutil create -volname "AutoDubber" -srcfolder dist/AutoDubber.app -ov -format UDZO dist/AutoDubber-mac.dmg
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4

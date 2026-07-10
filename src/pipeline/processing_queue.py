@@ -34,6 +34,8 @@ class ProcessingQueue:
         self._queue: queue_module.Queue[_Task] = queue_module.Queue()
         self._worker: threading.Thread | None = None
         self._stop_event = threading.Event()
+        # Guards the worker-exit-vs-start() handoff (see _run).
+        self._lock = threading.Lock()
 
     def add_task(
         self,
@@ -45,11 +47,12 @@ class ProcessingQueue:
 
     def start(self) -> None:
         """Start the worker thread if it isn't already running."""
-        if self.is_running():
-            return
-        self._stop_event.clear()
-        self._worker = threading.Thread(target=self._run, daemon=True)
-        self._worker.start()
+        with self._lock:
+            if self.is_running():
+                return
+            self._stop_event.clear()
+            self._worker = threading.Thread(target=self._run, daemon=True)
+            self._worker.start()
 
     def stop(self) -> None:
         """Request a stop; the worker exits after the current job finishes."""
@@ -63,7 +66,16 @@ class ProcessingQueue:
             try:
                 task = self._queue.get(timeout=0.2)
             except queue_module.Empty:
-                break  # nothing left to do; let the worker exit (idle)
+                # Idle-exit races with add_task()+start(): if start() sees a
+                # still-alive worker it won't spawn a new one, so a task
+                # enqueued right now could be stranded. Deciding under the
+                # lock (and clearing self._worker before exiting) guarantees
+                # the task is either picked up here or a fresh worker starts.
+                with self._lock:
+                    if self._queue.empty():
+                        self._worker = None
+                        return
+                continue
 
             def progress_cb(stage: str, frac: float, msg: str, op=task.on_progress) -> None:
                 self._post(lambda: op(stage, frac, msg))

@@ -41,7 +41,11 @@ def _format_time(seconds: float) -> str:
 
 
 def _wrap_text(text: str) -> str:
-    """Collapse newlines and word-wrap long lines using ASS ``\\N`` breaks."""
+    """Sanitize for ASS, collapse newlines, and word-wrap with ``\\N`` breaks."""
+    # ASS has no escape for these: `{`/`}` open override blocks (hiding the
+    # enclosed text in the player) and `\` can start a control sequence, so
+    # substitute lookalikes.
+    text = text.replace("{", "(").replace("}", ")").replace("\\", "/")
     # Collapse any embedded newlines/whitespace runs into single spaces.
     text = " ".join(text.split())
     if len(text) <= _WRAP_THRESHOLD:

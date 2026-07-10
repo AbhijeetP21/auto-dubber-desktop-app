@@ -4,7 +4,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from utils.ffmpeg_utils import get_ffmpeg_path, has_audio_stream
+from utils.ffmpeg_utils import SUBPROCESS_FLAGS, get_ffmpeg_path, has_audio_stream
 
 
 def extract_audio(video_path: Path, output_wav: Path) -> None:
@@ -27,7 +27,7 @@ def extract_audio(video_path: Path, output_wav: Path) -> None:
         "-ac", "1",
         "-y", str(output_wav),
     ]
-    proc = subprocess.run(cmd, capture_output=True)
+    proc = subprocess.run(cmd, capture_output=True, creationflags=SUBPROCESS_FLAGS)
     if proc.returncode != 0:
         stderr = proc.stderr.decode("utf-8", errors="replace")[-500:]
         raise RuntimeError(

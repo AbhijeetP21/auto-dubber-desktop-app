@@ -102,6 +102,14 @@ def _download(
             return
         except DownloadCancelled:
             raise
+        except urllib.error.HTTPError as exc:
+            # 416 = our Range start is at/past the file's end (e.g. a fully
+            # downloaded .part that was never promoted). Resuming can never
+            # succeed, so discard the partial and retry from scratch.
+            if exc.code == 416:
+                tmp.unlink(missing_ok=True)
+            last_error = exc
+            continue
         except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError, OSError) as exc:
             last_error = exc  # keep .part for resume, then retry
             continue

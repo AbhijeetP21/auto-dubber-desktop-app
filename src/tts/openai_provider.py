@@ -14,7 +14,7 @@ from typing import Callable
 
 import soundfile as sf
 
-from utils.ffmpeg_utils import get_ffmpeg_path
+from utils.ffmpeg_utils import SUBPROCESS_FLAGS, get_ffmpeg_path
 
 from .base import TTSProvider
 
@@ -27,6 +27,7 @@ def _mp3_to_wav(mp3_path: Path, wav_path: Path) -> None:
     proc = subprocess.run(
         [get_ffmpeg_path(), "-i", str(mp3_path), "-y", str(wav_path)],
         capture_output=True,
+        creationflags=SUBPROCESS_FLAGS,
     )
     if proc.returncode != 0:
         stderr = proc.stderr.decode("utf-8", errors="replace")[-500:]

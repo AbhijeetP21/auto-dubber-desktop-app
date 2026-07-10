@@ -80,6 +80,8 @@ coll = COLLECT(
     a.binaries,
     a.zipfiles,
     a.datas,
-    upx=True,
+    # UPX corrupts onnxruntime/ctranslate2 native DLLs -> "DLL load failed"
+    # at startup on machines where UPX happens to be on PATH.
+    upx=False,
     name="AutoDubber",
 )
