@@ -24,9 +24,14 @@ Output: `{input_stem}_dubbed.mkv` with three tracks:
 
 | Track | Contents | Default |
 |---|---|---|
-| Audio 0 | Original audio (copied, untouched) | ✅ on |
-| Audio 1 | English dub (AAC 192k) | off |
-| Subtitle 0 | English subtitles (ASS, styled) | off |
+| Audio 0 | Original audio (copied, untouched) | off |
+| Audio 1 | English dub (AAC 192k) | ✅ on |
+| Subtitle 0 | English subtitles (ASS, styled) | ✅ on |
+
+Transcription and translation run **locally and free** via
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper) (Whisper's
+`task="translate"`); no API key is needed. The default TTS (Kokoro) is also
+local and free — only the optional OpenAI TTS provider costs money.
 
 ### Dev setup (local, self-contained)
 
@@ -34,8 +39,7 @@ Dependencies live entirely inside this folder. Python is pinned with **mise** an
 packages install into a project-local `.venv`:
 
 ```bash
-mise install                 # installs Python 3.11 (per mise.toml)
-mise run                     # or: source the venv; mise auto-creates ./.venv
+mise install                 # installs Python 3.11 (per mise.toml) and creates ./.venv
 .venv/Scripts/python -m pip install -r requirements.txt   # Windows
 .venv/bin/python   -m pip install -r requirements.txt     # macOS/Linux
 ```
@@ -52,12 +56,13 @@ resolved through `src/utils/ffmpeg_utils.py`.
 
 - `--lang` — source-language hint (ISO 639-1, e.g. `ja`, `hi`); omit to auto-detect
 - `--tts` — `kokoro` (local, free, default) or `openai` (API, needs key in settings)
-- `--model` — Whisper size: `tiny | base | medium | large-v3` (default `large-v3`)
+- `--model` — Whisper size: `tiny | base | small | medium | large-v3` (default `large-v3`)
 - `--out` — output directory (default: same folder as the input video)
 
-On first run the chosen TTS downloads its model files:
-- **Kokoro** → `~/.cache/auto-dubber/kokoro/`
-- **Whisper** → `~/.cache/huggingface/`
+On first run the models download automatically:
+- **Kokoro** (~350 MB) → `~/.cache/auto-dubber/kokoro/`
+- **Whisper** → `~/.cache/huggingface/` — note the default `large-v3` is
+  **~3 GB**; pick `small` or `medium` for a faster first run
 
 ### Supported formats
 
@@ -142,4 +147,5 @@ editable in the in-app **⚙ Settings** dialog.
 | `openai_voice` | `nova` | used with `tts-1-hd` |
 | `subtitle_font` | `Arial` | `Arial`, `Georgia`, or `Verdana` |
 | `subtitle_font_size` | `32` | 12–48 |
-| `max_stretch_ratio` | `1.35` | max dub speed-up before truncation |
+| `max_stretch_ratio` | `1.35` | max dub speed-up before truncation (clamped to 1.0–4.0) |
+| `openai_api_key` | empty | stored in plaintext in this file — treat it like a password file |

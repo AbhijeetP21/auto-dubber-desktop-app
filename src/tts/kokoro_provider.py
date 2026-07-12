@@ -79,11 +79,12 @@ def _download(
                     total, resume_from, mode = length, 0, "wb"  # server sent full file
 
                 read = resume_from
+                cancelled = False
                 with open(tmp, mode) as f:
                     while True:
                         if should_cancel is not None and should_cancel():
-                            tmp.unlink(missing_ok=True)
-                            raise DownloadCancelled()
+                            cancelled = True
+                            break
                         chunk = resp.read(1 << 20)
                         if not chunk:
                             break
@@ -91,6 +92,12 @@ def _download(
                         read += len(chunk)
                         if progress_callback is not None and total:
                             progress_callback(min(read / total, 1.0))
+                if cancelled:
+                    # Unlink only after the file handle is closed — deleting an
+                    # open file raises a sharing violation on Windows, which
+                    # would masquerade as a network error and eat the cancel.
+                    tmp.unlink(missing_ok=True)
+                    raise DownloadCancelled()
 
             # Stream ended; verify completeness before committing.
             if total and tmp.stat().st_size < total:

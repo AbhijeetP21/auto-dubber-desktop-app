@@ -7,8 +7,12 @@ marshaled back onto the UI thread.
 from __future__ import annotations
 
 import queue as queue_module
+import sys
 import threading
+import traceback
+from dataclasses import replace
 from pathlib import Path
+from tkinter import messagebox
 from typing import Callable
 
 import customtkinter as ctk
@@ -23,6 +27,7 @@ from tts.kokoro_provider import (
     ensure_model_files,
     model_files_present,
 )
+from utils.ffmpeg_utils import terminate_active_ffmpeg
 from utils.lang_codes import DISPLAY_TO_ISO6391
 
 from . import styles
@@ -68,11 +73,14 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self._proc_queue = ProcessingQueue(post_to_ui=self._ui_queue.put)
         self._pending_count = 0
         self._last_output_path: Path | None = None
+        # Cancel event per in-flight job, keyed by queue-row id. Removing a row
+        # or hitting Cancel sets the event; the pipeline aborts at its next
+        # checkpoint (or the task is skipped if it hasn't started).
+        self._job_cancels: dict[int, threading.Event] = {}
 
         # First-run Kokoro model download state.
         self._download_thread: threading.Thread | None = None
         self._download_cancel = threading.Event()
-        self._kokoro_unavailable_this_session = False
 
         # Layout: header (0), banner (1), content (2, expands), bottom bar (3).
         self.grid_columnconfigure(0, weight=1)
@@ -82,6 +90,8 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self._build_banner()
         self._build_content()
         self._build_bottom_bar()
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._maybe_start_model_download()
         self._poll_ui_queue()
@@ -94,10 +104,32 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
                 try:
                     fn()
                 except Exception:
-                    pass
+                    # A UI-callback bug must not kill the poller, but silently
+                    # swallowing it makes stuck states undebuggable.
+                    traceback.print_exc(file=sys.stderr)
         except queue_module.Empty:
             pass
         self.after(50, self._poll_ui_queue)
+
+    def _on_close(self) -> None:
+        """Window close: confirm if jobs are running, then stop everything.
+
+        Without this, closing the window kills Python but leaves any running
+        FFmpeg child orphaned, still writing a half-finished output file.
+        """
+        if self._pending_count > 0:
+            if not messagebox.askyesno(
+                "Quit Auto Dubber",
+                "Jobs are still processing. Quit and cancel them?",
+                parent=self,
+            ):
+                return
+        for event in self._job_cancels.values():
+            event.set()
+        self._download_cancel.set()
+        self._proc_queue.stop()
+        terminate_active_ffmpeg()
+        self.destroy()
 
     # --- Header -----------------------------------------------------------
     def _build_header(self) -> None:
@@ -206,9 +238,16 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self._refresh_tts_indicator()
 
     def _on_download_cancelled(self) -> None:
-        self._banner.grid_remove()
-        self._kokoro_unavailable_this_session = True
-        self._flash_message("Kokoro download cancelled — switch to OpenAI in Settings")
+        # Keep the banner up with a Retry button — cancelling the download must
+        # not brick Kokoro for the session (the download restarts on Retry or
+        # automatically when the queue is started).
+        self._banner_label.configure(
+            text="Kokoro model download cancelled", text_color=styles.TEXT_SECONDARY
+        )
+        self._banner_bar.set(0.0)
+        self._banner_cancel.configure(
+            state="normal", text="Retry", command=self._start_model_download
+        )
         self._refresh_tts_indicator()
 
     def _on_download_failed(self, message: str) -> None:
@@ -237,7 +276,7 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         self.drop_zone = DropZone(content, on_files_added=self._on_files_added)
         self.drop_zone.grid(row=0, column=0, sticky="nsew", padx=(0, styles.PAD_M))
 
-        self.queue = QueuePanel(content)
+        self.queue = QueuePanel(content, on_removed=self._on_row_removed)
         self.queue.grid(row=0, column=1, sticky="nsew")
 
     # --- Bottom bar -------------------------------------------------------
@@ -301,16 +340,22 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
 
     # --- Callbacks --------------------------------------------------------
     def _on_files_added(self, paths: list[Path]) -> None:
-        # Dedup by resolved absolute path against what's already queued.
-        existing = {p.resolve() for p in self.queue.get_paths()}
+        # Dedup by resolved absolute path against what's already queued —
+        # except finished (done/error) rows, which are replaced so a failed
+        # file can be retried simply by dropping it again.
         skipped = 0
         for path in paths:
             resolved = path.resolve()
-            if resolved in existing:
+            duplicate = False
+            for row in self.queue.rows_for_path(resolved):
+                if row.status in ("done", "error"):
+                    self.queue.remove_item(row.item_id)
+                else:
+                    duplicate = True
+            if duplicate:
                 skipped += 1
                 continue
             self.queue.add_item(resolved)
-            existing.add(resolved)
         if skipped:
             self._flash_message(f"Already in queue: {skipped} skipped")
 
@@ -344,9 +389,6 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
         if self.settings.tts_provider == "openai" and not ready:
             self._flash_message(reason)
             return
-        if self.settings.tts_provider == "kokoro" and self._kokoro_unavailable_this_session:
-            self._flash_message("Kokoro disabled this session — enable OpenAI in Settings")
-            return
         if self.settings.tts_provider == "kokoro" and not model_files_present():
             # Don't start a job that would stall on a mid-run model download.
             self._start_model_download()
@@ -359,6 +401,11 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             else None
         )
         hint = self.selected_language_hint()
+        # Snapshot the settings for this batch: editing Settings mid-batch must
+        # not silently reconfigure jobs that are already queued or running.
+        batch_settings = replace(self.settings)
+        batch_provider = self.tts_provider
+        self._last_output_path = None  # only reveal output produced by THIS batch
 
         for row in rows:
             row.set_status("processing")
@@ -368,18 +415,36 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
                 input_path=row.path,
                 output_dir=out_dir,
                 language_hint=hint,
-                tts_provider=self.tts_provider,
-                settings=self.settings,
+                tts_provider=batch_provider,
+                settings=batch_settings,
             )
             self._pending_count += 1
-            self._proc_queue.add_task(
+            cancel_event = self._proc_queue.add_task(
                 job,
                 on_progress=lambda stage, frac, msg, r=row: self._on_job_progress(r, frac, msg),
                 on_complete=lambda result, r=row: self._on_job_complete(r, result),
             )
+            self._job_cancels[row.item_id] = cancel_event
 
-        self._start_button.configure(state="disabled", text="Processing…")
+        self._start_button.configure(
+            text="■ Cancel", command=self._cancel_all, fg_color=styles.ERROR
+        )
         self._proc_queue.start()
+
+    def _cancel_all(self) -> None:
+        """Cancel every in-flight job: queued tasks are skipped, the running
+        job aborts at its next checkpoint, and any live FFmpeg child is killed."""
+        self._start_button.configure(state="disabled", text="Cancelling…")
+        for event in self._job_cancels.values():
+            event.set()
+        terminate_active_ffmpeg()
+
+    def _on_row_removed(self, item_id: int) -> None:
+        """A queue row was removed — cancel its job so it doesn't keep burning
+        compute (and writing output) for a file the user discarded."""
+        event = self._job_cancels.get(item_id)
+        if event is not None:
+            event.set()
 
     def _on_job_progress(self, row, fraction: float, message: str) -> None:
         # Runs on the UI thread (marshaled by ProcessingQueue).
@@ -388,18 +453,29 @@ class App(ctk.CTk, TkinterDnD.DnDWrapper):
             row.set_message(message)
 
     def _on_job_complete(self, row, result) -> None:
-        if row.winfo_exists():
-            if result.success and result.output_path is not None:
-                row.set_done(result.output_path)
-                self._last_output_path = result.output_path
-            else:
-                row.set_error(result.error or "Unknown error")
-
-        self._pending_count = max(0, self._pending_count - 1)
-        if self._pending_count == 0:
-            self._start_button.configure(state="normal", text="▶ Start Queue")
-            if self.settings.open_output_on_complete and self._last_output_path is not None:
-                reveal_in_file_manager(self._last_output_path)
+        try:
+            self._job_cancels.pop(row.item_id, None)
+            if row.winfo_exists():
+                if result.success and result.output_path is not None:
+                    row.set_done(result.output_path)
+                    self._last_output_path = result.output_path
+                elif result.cancelled:
+                    row.set_cancelled()
+                else:
+                    row.set_error(result.error or "Unknown error")
+        finally:
+            # The batch-complete bookkeeping must run even if a widget update
+            # blows up, or the Start button would stay disabled forever.
+            self._pending_count = max(0, self._pending_count - 1)
+            if self._pending_count == 0:
+                self._start_button.configure(
+                    state="normal",
+                    text="▶ Start Queue",
+                    command=self._start_queue,
+                    fg_color=styles.ACCENT,
+                )
+                if self.settings.open_output_on_complete and self._last_output_path is not None:
+                    reveal_in_file_manager(self._last_output_path)
 
     # --- Helpers ----------------------------------------------------------
     def selected_language_hint(self) -> str | None:

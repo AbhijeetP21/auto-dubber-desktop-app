@@ -2,19 +2,24 @@
 
 Each subtitle segment owns a ``[start, end]`` window. The TTS clip for that
 segment is padded with silence (if short) or sped up with FFmpeg's ``atempo``
-filter (if long), so it lands exactly in its window. Clips are then overlaid
-onto a full-length silent track at their start offsets.
+filter (if long), so it lands exactly in its window. Clips are then mixed into
+a preallocated sample buffer at their start offsets — O(total) work and memory,
+unlike repeated pydub ``overlay`` which copies the whole track per segment and
+made feature-length videos pathologically slow.
 """
 from __future__ import annotations
 
 import os
-import subprocess
 import tempfile
 from pathlib import Path
+from typing import Callable
 
+import numpy as np
+import soundfile as sf
 from pydub import AudioSegment
 
-from utils.ffmpeg_utils import SUBPROCESS_FLAGS, get_ffmpeg_path
+from utils.cancellation import CancelCheck, check_cancelled
+from utils.ffmpeg_utils import get_ffmpeg_path, run_ffmpeg
 
 from .transcriber import Segment
 
@@ -22,13 +27,17 @@ from .transcriber import Segment
 AudioSegment.converter = get_ffmpeg_path()
 
 _FADE_OUT_MS = 60
+# Output format: Kokoro is natively 24kHz mono; OpenAI TTS decodes to the same.
+# The muxer re-encodes to AAC, so there is no benefit to upsampling here.
+_SAMPLE_RATE = 24000
 
 
 def _speedup_ffmpeg(audio: AudioSegment, ratio: float, ffmpeg_path: str) -> AudioSegment:
     """Speed audio up by ``ratio`` using FFmpeg's atempo filter.
 
     atempo accepts 0.5–2.0 per instance, so ratios above 2.0 are split across two
-    chained filters (sqrt each).
+    chained filters (sqrt each). Ratios above 4.0 are unreachable: settings clamp
+    ``max_stretch_ratio`` to [1.0, 4.0].
     """
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as inp:
         audio.export(inp.name, format="wav")
@@ -42,12 +51,14 @@ def _speedup_ffmpeg(audio: AudioSegment, ratio: float, ffmpeg_path: str) -> Audi
         atempo_filter = f"atempo={r1:.4f},atempo={r1:.4f}"
 
     try:
-        subprocess.run(
-            [ffmpeg_path, "-i", inp_path, "-filter:a", atempo_filter, "-y", out_path],
-            check=True,
-            capture_output=True,
-            creationflags=SUBPROCESS_FLAGS,
+        proc = run_ffmpeg(
+            [ffmpeg_path, "-i", inp_path, "-filter:a", atempo_filter, "-y", out_path]
         )
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode("utf-8", errors="replace")[-500:]
+            raise RuntimeError(
+                f"FFmpeg atempo (ratio {ratio:.2f}) failed:\n{stderr}"
+            )
         result = AudioSegment.from_wav(out_path)
     finally:
         for p in (inp_path, out_path):
@@ -90,12 +101,20 @@ def _fit_segment(
     return fitted
 
 
+def _to_samples(clip: AudioSegment) -> np.ndarray:
+    """Convert a pydub clip to int16 mono samples at the track sample rate."""
+    clip = clip.set_frame_rate(_SAMPLE_RATE).set_channels(1).set_sample_width(2)
+    return np.frombuffer(clip.raw_data, dtype=np.int16)
+
+
 def build_dubbed_track(
     segments: list[Segment],
     tts_wav_paths: list[Path],
     total_duration_seconds: float,
     output_wav: Path,
     max_stretch_ratio: float = 1.35,
+    progress_callback: Callable[[float], None] | None = None,
+    should_cancel: CancelCheck | None = None,
 ) -> None:
     """Build a full-length dubbed WAV from per-segment TTS clips.
 
@@ -103,8 +122,10 @@ def build_dubbed_track(
         segments: subtitle segments (provide the time windows).
         tts_wav_paths: one WAV per segment, in the same order.
         total_duration_seconds: length of the source video.
-        output_wav: destination (44.1kHz stereo WAV).
+        output_wav: destination (24kHz mono WAV; the muxer re-encodes to AAC).
         max_stretch_ratio: max speed-up before truncating overflow.
+        progress_callback: called with 0.0–1.0 as segments are placed.
+        should_cancel: raises :class:`JobCancelled` mid-build when it reports True.
     """
     if len(segments) != len(tts_wav_paths):
         raise ValueError(
@@ -113,18 +134,29 @@ def build_dubbed_track(
         )
 
     ffmpeg_path = get_ffmpeg_path()
-    total_ms = int(round(total_duration_seconds * 1000))
-    full_track = AudioSegment.silent(duration=total_ms)
+    total_frames = int(round(total_duration_seconds * _SAMPLE_RATE))
+    # int32 accumulator so overlapping segments mix without wrapping; clipped
+    # back to int16 at the end.
+    track = np.zeros(max(total_frames, 1), dtype=np.int32)
 
-    for seg, wav_path in zip(segments, tts_wav_paths):
-        tts_audio = AudioSegment.from_wav(str(wav_path))
+    total = len(segments)
+    for idx, (seg, wav_path) in enumerate(zip(segments, tts_wav_paths)):
+        check_cancelled(should_cancel)
         window_ms = int(round((seg.end - seg.start) * 1000))
         if window_ms <= 0:
             continue
+        tts_audio = AudioSegment.from_wav(str(wav_path))
         fitted = _fit_segment(tts_audio, window_ms, max_stretch_ratio, ffmpeg_path)
-        position_ms = int(round(seg.start * 1000))
-        full_track = full_track.overlay(fitted, position=position_ms)
+        samples = _to_samples(fitted).astype(np.int32)
 
-    full_track = full_track.set_frame_rate(44100).set_channels(2)
+        start = int(round(seg.start * _SAMPLE_RATE))
+        if start >= total_frames:
+            continue  # segment starts past the end of the source audio
+        end = min(start + len(samples), total_frames)
+        track[start:end] += samples[: end - start]
+        if progress_callback is not None:
+            progress_callback((idx + 1) / total)
+
     output_wav.parent.mkdir(parents=True, exist_ok=True)
-    full_track.export(str(output_wav), format="wav")
+    final = np.clip(track, -32768, 32767).astype(np.int16)
+    sf.write(str(output_wav), final, _SAMPLE_RATE, subtype="PCM_16")

@@ -5,11 +5,6 @@ on:
     tags:
       - 'v*.*.*'
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version tag (e.g. v1.0.0)'
-        required: false
-        default: 'dev'
 
 jobs:
   build-macos:
@@ -28,7 +23,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install "pyinstaller>=6.10,<7"
 
       - name: Generate icons
         run: python assets/generate_icons.py
@@ -36,8 +31,13 @@ jobs:
       - name: Build .app
         run: pyinstaller build_mac.spec --clean --noconfirm
 
+      # Run the frozen binary's diagnostic so a build missing lazily-imported
+      # packages or bundled data fails here, not on a user's machine.
+      - name: Smoke test frozen app
+        run: dist/AutoDubber.app/Contents/MacOS/AutoDubber --selftest
+
       # hdiutil works headless; create-dmg drives Finder via AppleScript and
-      # fails on GUI-less runners. Matches build_mac.sh.
+      # fails on GUI-less runners.
       - name: Create DMG
         run: hdiutil create -volname "AutoDubber" -srcfolder dist/AutoDubber.app -ov -format UDZO dist/AutoDubber-mac.dmg
 
@@ -64,13 +64,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install "pyinstaller>=6.10,<7"
 
       - name: Generate icons
         run: python assets/generate_icons.py
 
       - name: Build .exe
         run: pyinstaller build_windows.spec --clean --noconfirm
+
+      # The exe is a GUI-subsystem binary (no console output on CI), but the
+      # exit code still reports whether every bundled dependency loads.
+      - name: Smoke test frozen app
+        run: |
+          $p = Start-Process -FilePath "dist/AutoDubber/AutoDubber.exe" -ArgumentList "--selftest" -Wait -PassThru -NoNewWindow
+          exit $p.ExitCode
 
       - name: Zip output
         run: Compress-Archive -Path dist/AutoDubber -DestinationPath dist/AutoDubber-windows.zip

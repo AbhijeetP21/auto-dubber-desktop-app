@@ -53,7 +53,12 @@ def main() -> int:
     parser.add_argument("video", type=Path, help="input video file")
     parser.add_argument("--lang", default=None, help="source language ISO 639-1 hint (e.g. ja)")
     parser.add_argument("--tts", default="kokoro", choices=["kokoro", "openai"])
-    parser.add_argument("--model", default=None, help="Whisper model size (overrides settings)")
+    parser.add_argument(
+        "--model",
+        default=None,
+        choices=["tiny", "base", "small", "medium", "large-v3"],
+        help="Whisper model size (overrides settings)",
+    )
     parser.add_argument("--out", type=Path, default=None, help="output directory")
     args = parser.parse_args()
 
