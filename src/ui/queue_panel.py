@@ -168,6 +168,12 @@ class QueueItemRow(ctk.CTkFrame):
         )
         self._detail.unbind("<Button-1>")
 
+    def set_cancelled(self) -> None:
+        """Return the row to the queued state so Start can retry it."""
+        self.set_status(STATUS_QUEUED)
+        self.set_progress(0.0)
+        self.set_message("Cancelled — press Start Queue to retry")
+
     def _reveal(self) -> None:
         if self._output_path is not None:
             reveal_in_file_manager(self._output_path)
@@ -176,7 +182,12 @@ class QueueItemRow(ctk.CTkFrame):
 class QueuePanel(ctk.CTkScrollableFrame):
     """Manages a scrollable list of :class:`QueueItemRow`s, keyed by id."""
 
-    def __init__(self, master, **kwargs) -> None:
+    def __init__(
+        self,
+        master,
+        on_removed: Callable[[int], None] | None = None,
+        **kwargs,
+    ) -> None:
         super().__init__(
             master,
             fg_color=styles.BG,
@@ -187,6 +198,8 @@ class QueuePanel(ctk.CTkScrollableFrame):
         self.grid_columnconfigure(0, weight=1)
         self._rows: dict[int, QueueItemRow] = {}
         self._next_id = 0
+        # Notified after a row is removed, so the app can cancel its queued job.
+        self._on_removed = on_removed
 
     def add_item(self, path: Path) -> int:
         item_id = self._next_id
@@ -200,9 +213,14 @@ class QueuePanel(ctk.CTkScrollableFrame):
         row = self._rows.pop(item_id, None)
         if row is not None:
             row.destroy()
+            if self._on_removed is not None:
+                self._on_removed(item_id)
 
     def row(self, item_id: int) -> QueueItemRow | None:
         return self._rows.get(item_id)
+
+    def rows_for_path(self, path: Path) -> list[QueueItemRow]:
+        return [row for row in self._rows.values() if row.path == path]
 
     def get_paths(self) -> set[Path]:
         return {row.path for row in self._rows.values()}

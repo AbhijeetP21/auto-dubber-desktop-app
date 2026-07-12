@@ -1,10 +1,9 @@
 """Mux video + original audio + English dub + subtitles into a multi-track MKV."""
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
-from utils.ffmpeg_utils import SUBPROCESS_FLAGS, get_ffmpeg_path, has_audio_stream
+from utils.ffmpeg_utils import get_ffmpeg_path, has_audio_stream, run_ffmpeg
 
 
 def mux_output(
@@ -63,7 +62,7 @@ def mux_output(
         "-y", str(output_path),
     ]
 
-    proc = subprocess.run(cmd, capture_output=True, creationflags=SUBPROCESS_FLAGS)
+    proc = run_ffmpeg(cmd)
     if proc.returncode != 0:
         stderr = proc.stderr.decode("utf-8", errors="replace")[-500:]
         raise RuntimeError(

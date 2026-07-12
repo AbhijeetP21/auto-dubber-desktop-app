@@ -10,12 +10,54 @@ from __future__ import annotations
 import functools
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 # Pass as ``creationflags`` to every FFmpeg subprocess: in the windowed
 # (no-console) frozen app on Windows, each spawn would otherwise flash a
 # black console window. No-op on other platforms.
 SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+# Every live FFmpeg child spawned via run_ffmpeg(), so the app can kill them
+# on cancel or window close instead of orphaning them mid-encode.
+_active_procs: set[subprocess.Popen] = set()
+_active_lock = threading.Lock()
+
+
+def run_ffmpeg(cmd: list[str]) -> subprocess.CompletedProcess:
+    """Run an FFmpeg command with output captured, tracking the live process.
+
+    Behaves like ``subprocess.run(cmd, capture_output=True)`` but registers the
+    child so :func:`terminate_active_ffmpeg` can kill it from another thread.
+    ``-nostdin`` is prepended so ffmpeg never eats console input in CLI use.
+    """
+    full_cmd = [cmd[0], "-nostdin", *cmd[1:]]
+    proc = subprocess.Popen(
+        full_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
+        creationflags=SUBPROCESS_FLAGS,
+    )
+    with _active_lock:
+        _active_procs.add(proc)
+    try:
+        stdout, stderr = proc.communicate()
+    finally:
+        with _active_lock:
+            _active_procs.discard(proc)
+    return subprocess.CompletedProcess(full_cmd, proc.returncode, stdout, stderr)
+
+
+def terminate_active_ffmpeg() -> None:
+    """Kill every FFmpeg child currently running (used on cancel/app close)."""
+    with _active_lock:
+        procs = list(_active_procs)
+    for proc in procs:
+        try:
+            proc.kill()
+        except OSError:
+            pass
 
 
 @functools.lru_cache(maxsize=1)
@@ -41,11 +83,7 @@ def has_audio_stream(video_path: Path) -> bool:
     Raises ``ValueError`` if FFmpeg cannot open the file at all (missing or
     corrupt input), so that case isn't misreported as "no audio stream".
     """
-    proc = subprocess.run(
-        [get_ffmpeg_path(), "-i", str(video_path), "-hide_banner"],
-        capture_output=True,
-        creationflags=SUBPROCESS_FLAGS,
-    )
+    proc = run_ffmpeg([get_ffmpeg_path(), "-i", str(video_path), "-hide_banner"])
     stderr = proc.stderr.decode("utf-8", errors="replace")
     if not any("Input #" in line for line in stderr.splitlines()):
         raise ValueError(

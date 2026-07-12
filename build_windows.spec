@@ -24,7 +24,6 @@ hiddenimports = [
     "ctranslate2",
     "kokoro_onnx",
     "onnxruntime",
-    "librosa",
     "soundfile",
     "pydub",
     "openai",
@@ -32,6 +31,8 @@ hiddenimports = [
 
 # These packages ship data files / native libs that must be collected explicitly
 # or the frozen app fails at runtime (model loaders, tkdnd, espeak data, etc.).
+# A collect failure must fail the build loudly: swallowing it ships a build
+# that only breaks at runtime on the user's machine.
 for pkg in (
     "tkinterdnd2",
     "faster_whisper",
@@ -42,16 +43,12 @@ for pkg in (
     "phonemizer",
     "language_tags",
     "segments",
-    "librosa",
     "soundfile",
 ):
-    try:
-        d, b, h = collect_all(pkg)
-        datas += d
-        binaries += b
-        hiddenimports += h
-    except Exception:
-        pass
+    d, b, h = collect_all(pkg)
+    datas += d
+    binaries += b
+    hiddenimports += h
 
 a = Analysis(
     ["src/main.py"],

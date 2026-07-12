@@ -10,7 +10,7 @@ from config.settings import AppSettings, save_settings
 
 from . import styles
 
-_WHISPER_MODELS = ["tiny", "base", "medium", "large-v3"]
+_WHISPER_MODELS = ["tiny", "base", "small", "medium", "large-v3"]
 _FONTS = ["Arial", "Georgia", "Verdana"]
 
 
@@ -36,9 +36,13 @@ class SettingsDialog(ctk.CTkToplevel):
         self.geometry(f"{styles.SETTINGS_WIDTH}x{styles.SETTINGS_HEIGHT}")
         self.resizable(False, False)
 
-        # Modal behaviour.
+        # Modal behaviour. grab_set fails with "window not viewable" if the
+        # Toplevel isn't mapped yet (common on Linux WMs); retry once mapped.
         self.transient(master)
-        self.grab_set()
+        try:
+            self.grab_set()
+        except Exception:
+            self.after(100, lambda: self.winfo_exists() and self.grab_set())
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)

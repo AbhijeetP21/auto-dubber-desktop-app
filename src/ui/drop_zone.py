@@ -106,7 +106,7 @@ class DropZone(ctk.CTkFrame):
     def _emit(self, paths: list[Path]) -> None:
         supported = [
             p for p in paths
-            if p.suffix.lower() in SUPPORTED_VIDEO_EXTENSIONS
+            if p.suffix.lower() in SUPPORTED_VIDEO_EXTENSIONS and p.is_file()
         ]
         if supported:
             self._on_files_added(supported)

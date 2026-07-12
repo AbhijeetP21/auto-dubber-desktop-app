@@ -66,14 +66,27 @@ def load_settings() -> AppSettings:
     except (TypeError, ValueError):
         settings.subtitle_font_size = defaults.subtitle_font_size
     try:
-        settings.max_stretch_ratio = float(settings.max_stretch_ratio)
+        ratio = float(settings.max_stretch_ratio)
+        # json accepts NaN/Infinity; both (and anything outside atempo's usable
+        # range once split across two filters, i.e. (1.0, 4.0]) would make every
+        # over-long segment fail in FFmpeg. Clamp to the range the syncer supports.
+        if ratio != ratio or ratio in (float("inf"), float("-inf")):
+            ratio = defaults.max_stretch_ratio
+        settings.max_stretch_ratio = max(1.0, min(4.0, ratio))
     except (TypeError, ValueError):
         settings.max_stretch_ratio = defaults.max_stretch_ratio
     return settings
 
 
 def save_settings(settings: AppSettings) -> None:
-    """Persist settings to disk, creating the parent directory if needed."""
+    """Persist settings to disk atomically.
+
+    Written to a temp file then swapped in with ``os.replace``, so a crash
+    mid-write can never leave a truncated settings.json (which would silently
+    reset everything — including the API key — to defaults on next load).
+    """
     path = get_settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(settings), indent=2), encoding="utf-8")
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(asdict(settings), indent=2), encoding="utf-8")
+    os.replace(tmp, path)
